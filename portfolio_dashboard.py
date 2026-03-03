@@ -10,7 +10,7 @@ import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -59,7 +59,6 @@ TICKER_MAP = {
     "GOLD":             "GLD",
     "SILVER":           "SLV",
     "OIL":              "USO",
-    # Chinese/HK tickers (limited Yahoo coverage)
     "688041 CH Equity": "688041.SS",
     "603986 CH Equity": "603986.SS",
     "1772 HK Equity":   "1772.HK",
@@ -67,15 +66,14 @@ TICKER_MAP = {
     "002353 CH":        "002353.SZ",
 }
 
-# ── Portfolio structure from Excel ──────────────────────────────────────────
+# ── Portfolio structure ──────────────────────────────────────────────────────
 PORTFOLIO = [
-    # (bloomberg_ticker, name, weight, region, theme, sector)
     ("LAM US Equity",   "Lam Research",             0.004615, "Developed Markets", "Upstream AI",      "Machine"),
     ("SNDK US Equity",  "Sandisk",                  0.004615, "Developed Markets", "Upstream AI",      "Memory"),
-    ("MU US Equity",    "Micron Technology",         0.004615, "Developed Markets", "Upstream AI",      "Memory"),
+    ("MU US Equity",    "Micron Technology",        0.004615, "Developed Markets", "Upstream AI",      "Memory"),
     ("BDC US Equity",   "Belden Inc",               0.004615, "Developed Markets", "Upstream AI",      "Infrastructure - network"),
-    ("APLD US Equity",  "Applied Digital Corp",      0.004615, "Developed Markets", "Upstream AI",      "Infrastructure - system"),
-    ("MPWR US Equity",  "Monolithic Power Systems",  0.004615, "Developed Markets", "Upstream AI",      "Photooptic"),
+    ("APLD US Equity",  "Applied Digital Corp",     0.004615, "Developed Markets", "Upstream AI",      "Infrastructure - system"),
+    ("MPWR US Equity",  "Monolithic Power Systems", 0.004615, "Developed Markets", "Upstream AI",      "Photooptic"),
     ("COHR US Equity",  "Coherent",                 0.004615, "Developed Markets", "Upstream AI",      "Photooptic"),
     ("TER US Equity",   "Teradyne Inc",             0.004615, "Developed Markets", "Upstream AI",      "Machine"),
     ("PWR US Equity",   "Quanta Services",          0.004615, "Developed Markets", "Upstream AI",      "Infrastructure - service"),
@@ -120,260 +118,305 @@ PORTFOLIO = [
 
 PORTFOLIO_DF = pd.DataFrame(PORTFOLIO, columns=["bb_ticker","name","weight","region","theme","sector"])
 
-TIMEFRAMES = {
-    "YTD":  (datetime(datetime.today().year, 1, 1), datetime.today()),
-    "1M":   (datetime.today() - timedelta(days=30), datetime.today()),
-    "6M":   (datetime.today() - timedelta(days=182), datetime.today()),
-    "1Y":   (datetime.today() - timedelta(days=365), datetime.today()),
-    "3Y":   (datetime.today() - timedelta(days=1095), datetime.today()),
-}
+TODAY = date(2026, 3, 3)
+TFS   = ["Since Entry", "YTD", "1M", "3M", "6M", "1Y", "3Y"]
 
-# ── Data fetching ────────────────────────────────────────────────────────────
+# ── Data fetching ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_prices(tickers: list[str]) -> dict:
-    """Download 3Y of daily closes for all tickers."""
+def fetch_all_prices() -> dict:
     result = {}
-    start = datetime.today() - timedelta(days=1100)
-    for bb, yf_ticker in tickers:
+    fetch_start = datetime(2022, 1, 1)
+    for bb, yf_ticker in TICKER_MAP.items():
         try:
-            data = yf.download(yf_ticker, start=start, progress=False, auto_adjust=True)
+            data = yf.download(yf_ticker, start=fetch_start, progress=False, auto_adjust=True)
             if not data.empty:
                 result[bb] = data["Close"].squeeze()
         except Exception:
             pass
     return result
 
-def calc_return(series: pd.Series, start: datetime, end: datetime) -> float | None:
+def get_price_on(series: pd.Series, target: date) -> float | None:
     try:
-        s = series.loc[start:end].dropna()
-        if len(s) < 2:
-            return None
-        return (s.iloc[-1] / s.iloc[0] - 1) * 100
+        dt = pd.Timestamp(target)
+        s = series[series.index <= dt].dropna()
+        return float(s.iloc[-1]) if not s.empty else None
     except Exception:
         return None
 
-def build_returns_table(price_data: dict) -> pd.DataFrame:
+def calc_tf_return(series: pd.Series, tf: str, entry_date: date, today: date) -> float | None:
+    """
+    Each timeframe is measured backwards from today.
+    If entry_date falls AFTER the tf window start, we use entry_date instead
+    (you can't have returns before you entered).
+    """
+    tf_start_map = {
+        "Since Entry": entry_date,
+        "YTD":         date(today.year, 1, 1),
+        "1M":          today - timedelta(days=30),
+        "3M":          today - timedelta(days=91),
+        "6M":          today - timedelta(days=182),
+        "1Y":          today - timedelta(days=365),
+        "3Y":          today - timedelta(days=1095),
+    }
+    window_start    = tf_start_map[tf]
+    effective_start = max(window_start, entry_date)
+    p_start = get_price_on(series, effective_start)
+    p_end   = get_price_on(series, today)
+    if p_start is None or p_end is None or p_start == 0:
+        return None
+    return (p_end / p_start - 1) * 100
+
+def build_returns_table(price_data: dict, entry_date: date) -> pd.DataFrame:
     rows = []
     for _, row in PORTFOLIO_DF.iterrows():
         bb = row["bb_ticker"]
-        entry = {"bb_ticker": bb, "name": row["name"], "weight": row["weight"],
-                 "region": row["region"], "theme": row["theme"], "sector": row["sector"]}
+        rec = {k: row[k] for k in ["bb_ticker","name","weight","region","theme","sector"]}
         if bb in price_data:
             s = price_data[bb]
-            entry["current_price"] = round(float(s.iloc[-1]), 2)
-            for tf, (t_start, t_end) in TIMEFRAMES.items():
-                entry[tf] = calc_return(s, t_start, t_end)
+            rec["entry_price"]   = get_price_on(s, entry_date)
+            rec["current_price"] = get_price_on(s, TODAY)
+            for tf in TFS:
+                rec[tf] = calc_tf_return(s, tf, entry_date, TODAY)
         else:
-            entry["current_price"] = None
-            for tf in TIMEFRAMES:
-                entry[tf] = None
-        rows.append(entry)
+            rec["entry_price"]   = None
+            rec["current_price"] = None
+            for tf in TFS:
+                rec[tf] = None
+        rows.append(rec)
     return pd.DataFrame(rows)
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-def color_return(val):
-    if val is None or (isinstance(val, float) and np.isnan(val)):
-        return "color: grey"
-    return "color: #2ecc71" if val >= 0 else "color: #e74c3c"
+def weighted_return(df: pd.DataFrame, tf: str) -> float | None:
+    valid = df[df[tf].notna()].copy()
+    if valid.empty:
+        return None
+    total_w = valid["weight"].sum()
+    return (valid[tf] * valid["weight"] / total_w).sum() if total_w > 0 else None
 
 def fmt_pct(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "N/A"
     return f"{val:+.1f}%"
 
-# ── App ──────────────────────────────────────────────────────────────────────
+# ── Main app ──────────────────────────────────────────────────────────────────
 def main():
-    # Header
     st.markdown("""
         <h1 style='margin-bottom:0'>📊 Portfolio Simulation Dashboard</h1>
-        <p style='color:grey;margin-top:4px'>Auto-refreshed from Yahoo Finance · Delayed data</p>
+        <p style='color:grey;margin-top:4px'>Live data · Yahoo Finance · ~15 min delay</p>
     """, unsafe_allow_html=True)
 
-    # Sidebar controls
+    # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
         st.header("⚙️ Settings")
-        selected_tf = st.selectbox("Default Timeframe", list(TIMEFRAMES.keys()), index=0)
-        selected_regions = st.multiselect("Filter Region", PORTFOLIO_DF["region"].unique().tolist(),
-                                           default=PORTFOLIO_DF["region"].unique().tolist())
-        selected_themes = st.multiselect("Filter Theme", PORTFOLIO_DF["theme"].unique().tolist(),
-                                          default=PORTFOLIO_DF["theme"].unique().tolist())
-        refresh = st.button("🔄 Refresh Data", use_container_width=True)
-        if refresh:
+
+        # Business-day date list from 2022 to today
+        bdays     = [d.date() for d in pd.date_range(date(2022, 1, 1), TODAY, freq="B")]
+        def_idx   = len(bdays) - 1  # default = TODAY (Mar 3 2026)
+
+        st.markdown("**📅 Portfolio Entry Date**")
+        entry_idx  = st.select_slider(
+            "Slide to set entry point",
+            options=range(len(bdays)),
+            value=def_idx,
+            format_func=lambda i: bdays[i].strftime("%d %b %Y"),
+        )
+        entry_date = bdays[entry_idx]
+
+        days_held  = (TODAY - entry_date).days
+        st.success(f"Entry: **{entry_date.strftime('%d %b %Y')}**  \nToday: **{TODAY.strftime('%d %b %Y')}**  \nHeld: **{days_held} days**")
+
+        st.divider()
+        sel_regions = st.multiselect("Region", PORTFOLIO_DF["region"].unique().tolist(),
+                                     default=PORTFOLIO_DF["region"].unique().tolist())
+        sel_themes  = st.multiselect("Theme",  PORTFOLIO_DF["theme"].unique().tolist(),
+                                     default=PORTFOLIO_DF["theme"].unique().tolist())
+        st.divider()
+        if st.button("🔄 Refresh Prices", use_container_width=True):
             st.cache_data.clear()
-        st.caption(f"Last loaded: {datetime.now().strftime('%d %b %Y %H:%M')}")
+            st.rerun()
+        st.caption(f"Cached: {datetime.now().strftime('%d %b %Y %H:%M')}")
 
-    # Fetch data
-    with st.spinner("Fetching prices from Yahoo Finance..."):
-        ticker_pairs = [(bb, TICKER_MAP[bb]) for bb in PORTFOLIO_DF["bb_ticker"] if bb in TICKER_MAP]
-        price_data = fetch_prices(ticker_pairs)
-        df = build_returns_table(price_data)
+    # ── Load data ─────────────────────────────────────────────────────────────
+    with st.spinner("Pulling prices from Yahoo Finance..."):
+        price_data = fetch_all_prices()
+        df         = build_returns_table(price_data, entry_date)
 
-    # Apply filters
-    mask = df["region"].isin(selected_regions) & df["theme"].isin(selected_themes)
-    df_filtered = df[mask].copy()
+    mask = df["region"].isin(sel_regions) & df["theme"].isin(sel_themes)
+    df_f = df[mask].copy()
 
-    loaded = df_filtered["current_price"].notna().sum()
-    st.caption(f"✅ {loaded}/{len(df_filtered)} tickers loaded successfully")
+    n_loaded = df_f["current_price"].notna().sum()
+    st.caption(f"✅ {n_loaded} / {len(df_f)} tickers loaded  ·  Entry date: {entry_date.strftime('%d %b %Y')}")
 
-    # ── KPI row ──────────────────────────────────────────────────────────────
+    # ── Portfolio KPI strip (weighted) ─────────────────────────────────────────
     st.divider()
-    col1, col2, col3, col4, col5 = st.columns(5)
-    for col, tf in zip([col1, col2, col3, col4, col5], TIMEFRAMES.keys()):
-        vals = df_filtered[tf].dropna()
-        weights = df_filtered.loc[df_filtered[tf].notna(), "weight"]
-        if len(vals) > 0 and weights.sum() > 0:
-            wt_return = (vals.values * (weights.values / weights.sum())).sum()
-            delta_color = "normal" if wt_return >= 0 else "inverse"
-            col.metric(f"Portfolio {tf}", f"{wt_return:+.1f}%",
-                       delta=f"Weighted avg", delta_color=delta_color)
+    kpi_cols = st.columns(len(TFS))
+    for col, tf in zip(kpi_cols, TFS):
+        val = weighted_return(df_f, tf)
+        if val is not None:
+            col.metric(f"Portfolio {tf}", f"{val:+.1f}%",
+                       delta="weighted", delta_color="normal" if val >= 0 else "inverse")
         else:
             col.metric(f"Portfolio {tf}", "N/A")
 
+    st.caption("All portfolio returns are **weight-adjusted** across tickers with available data.")
     st.divider()
 
-    # ── Tabs ─────────────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Holdings Table", "📈 Price Performance", "🧩 Allocation", "📉 Price Chart"])
+    # ── Tabs ──────────────────────────────────────────────────────────────────
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📋 Holdings Table", "📈 Stock Returns", "🧩 Allocation & Heatmap", "📉 Price Chart"
+    ])
 
-    # ── Tab 1: Holdings Table ─────────────────────────────────────────────────
+    # Tab 1 ── Holdings table ──────────────────────────────────────────────────
     with tab1:
-        st.subheader("Holdings — Return by Timeframe")
+        st.subheader(f"Holdings  ·  Entry {entry_date.strftime('%d %b %Y')} → {TODAY.strftime('%d %b %Y')}")
 
-        display = df_filtered[["name","sector","region","theme","weight","current_price","YTD","1M","6M","1Y","3Y"]].copy()
-        display["weight"] = (display["weight"] * 100).round(2)
-        display.columns = ["Name","Sector","Region","Theme","Weight %","Price",*list(TIMEFRAMES.keys())]
+        disp = df_f[["name","sector","region","theme","weight","entry_price","current_price"] + TFS].copy()
+        disp["weight"] = disp["weight"] * 100
+        disp.columns   = ["Name","Sector","Region","Theme","Weight %","Entry Price","Current Price"] + TFS
 
-        def style_row(row):
-            styles = [""] * len(row)
-            for i, col in enumerate(row.index):
-                if col in TIMEFRAMES:
-                    val = row[col]
-                    if isinstance(val, (int, float)) and not np.isnan(val):
-                        styles[i] = "color: #2ecc71" if val >= 0 else "color: #e74c3c"
-            return styles
+        def _style(row):
+            out = [""] * len(row)
+            for i, c in enumerate(row.index):
+                if c in TFS:
+                    v = row[c]
+                    if isinstance(v, (int, float)) and not np.isnan(v):
+                        out[i] = "color:#2ecc71;font-weight:bold" if v >= 0 else "color:#e74c3c;font-weight:bold"
+            return out
 
-        fmt_dict = {tf: lambda x: fmt_pct(x) for tf in TIMEFRAMES}
-        fmt_dict["Weight %"] = "{:.3f}%".format
-        fmt_dict["Price"] = lambda x: f"{x:,.2f}" if pd.notna(x) else "N/A"
+        fmt = {tf: fmt_pct for tf in TFS}
+        fmt["Weight %"]      = "{:.3f}%".format
+        fmt["Entry Price"]   = lambda x: f"{x:,.2f}" if pd.notna(x) else "N/A"
+        fmt["Current Price"] = lambda x: f"{x:,.2f}" if pd.notna(x) else "N/A"
 
-        styled = display.style.apply(style_row, axis=1).format(fmt_dict)
-        st.dataframe(styled, use_container_width=True, height=600)
+        st.dataframe(disp.style.apply(_style, axis=1).format(fmt),
+                     use_container_width=True, height=650)
 
-    # ── Tab 2: Bar chart — returns by ticker ──────────────────────────────────
+    # Tab 2 ── Bar chart ───────────────────────────────────────────────────────
     with tab2:
-        st.subheader(f"Individual Stock Returns — {selected_tf}")
-        grp_by = st.radio("Group by", ["None","Theme","Region","Sector"], horizontal=True)
-
-        plot_df = df_filtered[["name","bb_ticker","region","theme","sector", selected_tf]].dropna(subset=[selected_tf])
-        plot_df = plot_df.sort_values(selected_tf, ascending=True)
-
-        color_col = {"None": "region","Theme":"theme","Region":"region","Sector":"sector"}[grp_by]
-
-        fig = px.bar(
-            plot_df, x=selected_tf, y="name",
-            color=color_col,
-            orientation="h",
-            title=f"{selected_tf} Price Return (%)",
-            labels={selected_tf: "Return (%)", "name": ""},
-            color_discrete_sequence=px.colors.qualitative.Set2,
-            height=max(500, len(plot_df) * 22),
-        )
-        fig.add_vline(x=0, line_dash="dash", line_color="white", line_width=1)
-        fig.update_layout(
-            paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-            font_color="white", legend_title_text=grp_by,
-            margin=dict(l=10, r=10, t=40, b=10)
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ── Tab 3: Allocation breakdown ───────────────────────────────────────────
-    with tab3:
-        c1, c2 = st.columns(2)
-
+        st.subheader("Individual Stock Returns")
+        c1, c2 = st.columns([1, 4])
         with c1:
-            st.subheader("By Region")
-            reg_df = PORTFOLIO_DF[mask].groupby("region")["weight"].sum().reset_index()
-            fig_reg = px.pie(reg_df, names="region", values="weight",
-                             color_discrete_sequence=px.colors.qualitative.Pastel)
-            fig_reg.update_layout(paper_bgcolor="#0e1117", font_color="white")
-            st.plotly_chart(fig_reg, use_container_width=True)
+            sel_tf  = st.selectbox("Timeframe", TFS, index=0)
+            clr_by  = st.radio("Color by", ["Theme","Region","Sector"], index=0)
+        clr_col  = {"Theme":"theme","Region":"region","Sector":"sector"}[clr_by]
+        plot_df  = df_f[["name","region","theme","sector", sel_tf]].dropna(subset=[sel_tf])
+        plot_df  = plot_df.sort_values(sel_tf, ascending=True)
+        port_ret = weighted_return(df_f, sel_tf)
 
         with c2:
+            fig = px.bar(plot_df, x=sel_tf, y="name", color=clr_col, orientation="h",
+                         title=f"{sel_tf} Return (%)  ·  Portfolio (weighted): {fmt_pct(port_ret)}",
+                         labels={sel_tf:"Return (%)", "name":""},
+                         color_discrete_sequence=px.colors.qualitative.Set2,
+                         height=max(500, len(plot_df)*22))
+            fig.add_vline(x=0, line_dash="dash", line_color="white", line_width=1)
+            if port_ret is not None:
+                fig.add_vline(x=port_ret, line_dash="dot", line_color="#f39c12", line_width=2,
+                              annotation_text=f"Portfolio {fmt_pct(port_ret)}",
+                              annotation_font_color="#f39c12")
+            fig.update_layout(paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                              font_color="white", margin=dict(l=10,r=40,t=40,b=10))
+            st.plotly_chart(fig, use_container_width=True)
+
+    # Tab 3 ── Allocation & Heatmap ────────────────────────────────────────────
+    with tab3:
+        pm = PORTFOLIO_DF["region"].isin(sel_regions) & PORTFOLIO_DF["theme"].isin(sel_themes)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("By Region")
+            rdf = PORTFOLIO_DF[pm].groupby("region")["weight"].sum().reset_index()
+            fig_r = px.pie(rdf, names="region", values="weight",
+                           color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_r.update_layout(paper_bgcolor="#0e1117", font_color="white")
+            st.plotly_chart(fig_r, use_container_width=True)
+        with c2:
             st.subheader("By Theme")
-            theme_df = PORTFOLIO_DF[mask].groupby("theme")["weight"].sum().reset_index()
-            fig_theme = px.pie(theme_df, names="theme", values="weight",
-                               color_discrete_sequence=px.colors.qualitative.Set2)
-            fig_theme.update_layout(paper_bgcolor="#0e1117", font_color="white")
-            st.plotly_chart(fig_theme, use_container_width=True)
+            tdf = PORTFOLIO_DF[pm].groupby("theme")["weight"].sum().reset_index()
+            fig_t = px.pie(tdf, names="theme", values="weight",
+                           color_discrete_sequence=px.colors.qualitative.Set2)
+            fig_t.update_layout(paper_bgcolor="#0e1117", font_color="white")
+            st.plotly_chart(fig_t, use_container_width=True)
 
-        st.subheader("Return Heatmap by Theme × Timeframe")
+        st.subheader("Weighted Return Heatmap — Theme × Timeframe")
         heat_rows = []
-        for theme, grp in df_filtered.groupby("theme"):
+        for theme, grp in df_f.groupby("theme"):
             row = {"Theme": theme}
-            for tf in TIMEFRAMES:
-                vals = grp[tf].dropna()
-                wts = grp.loc[grp[tf].notna(), "weight"]
-                if len(vals) > 0 and wts.sum() > 0:
-                    row[tf] = round((vals.values * (wts.values / wts.sum())).sum(), 2)
-                else:
-                    row[tf] = None
+            for tf in TFS:
+                wr = weighted_return(grp, tf)
+                row[tf] = round(wr, 2) if wr is not None else np.nan
             heat_rows.append(row)
-        heat_df = pd.DataFrame(heat_rows).set_index("Theme")
+        hdf = pd.DataFrame(heat_rows).set_index("Theme")
 
-        fig_heat = go.Figure(data=go.Heatmap(
-            z=heat_df.values,
-            x=list(heat_df.columns),
-            y=list(heat_df.index),
-            colorscale=[
-                [0.0, "#c0392b"], [0.4, "#2c2c2c"], [0.5, "#2c2c2c"], [1.0, "#27ae60"]
-            ],
+        fig_h = go.Figure(go.Heatmap(
+            z=hdf.values.astype(float),
+            x=list(hdf.columns), y=list(hdf.index),
+            colorscale=[[0,"#c0392b"],[0.45,"#2c2c2c"],[0.55,"#2c2c2c"],[1,"#27ae60"]],
             zmid=0,
-            text=[[fmt_pct(v) for v in row] for row in heat_df.values],
+            text=[[fmt_pct(v) for v in r] for r in hdf.values],
             texttemplate="%{text}",
         ))
-        fig_heat.update_layout(
-            paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-            font_color="white", height=400, margin=dict(l=10,r=10,t=20,b=10)
-        )
-        st.plotly_chart(fig_heat, use_container_width=True)
+        fig_h.update_layout(paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                            font_color="white", height=420, margin=dict(l=10,r=10,t=10,b=10))
+        st.plotly_chart(fig_h, use_container_width=True)
 
-    # ── Tab 4: Historical Price Chart ─────────────────────────────────────────
+    # Tab 4 ── Price Chart ─────────────────────────────────────────────────────
     with tab4:
-        st.subheader("Historical Price Performance")
-
-        available = df_filtered[df_filtered["current_price"].notna()]["bb_ticker"].tolist()
+        st.subheader("Historical Price Chart")
         names_map = dict(zip(PORTFOLIO_DF["bb_ticker"], PORTFOLIO_DF["name"]))
-        selected_stocks = st.multiselect(
-            "Select tickers to compare",
-            options=available,
-            default=available[:5],
-            format_func=lambda x: f"{names_map.get(x, x)} ({x})"
-        )
-        chart_tf = st.select_slider("Period", options=list(TIMEFRAMES.keys()), value="1Y")
-        normalize = st.checkbox("Normalize to 100 (indexed)", value=True)
+        available = df_f[df_f["current_price"].notna()]["bb_ticker"].tolist()
 
-        if selected_stocks:
-            t_start, t_end = TIMEFRAMES[chart_tf]
-            fig_line = go.Figure()
-            for bb in selected_stocks:
+        ca, cb = st.columns([3,1])
+        with ca:
+            sel_stocks = st.multiselect(
+                "Select tickers to plot",
+                options=available, default=available[:6],
+                format_func=lambda x: f"{names_map.get(x,x)} ({x})"
+            )
+        with cb:
+            normalize     = st.checkbox("Index to 100 at entry", value=True)
+            show_port_line = st.checkbox("Show portfolio line", value=True)
+
+        if sel_stocks:
+            entry_ts = pd.Timestamp(entry_date)
+            today_ts = pd.Timestamp(TODAY)
+            fig_l    = go.Figure()
+
+            for bb in sel_stocks:
                 if bb in price_data:
-                    s = price_data[bb].loc[t_start:t_end].dropna()
+                    s = price_data[bb].loc[entry_ts:today_ts].dropna()
                     if len(s) > 1:
                         y = (s / s.iloc[0] * 100) if normalize else s
-                        fig_line.add_trace(go.Scatter(
-                            x=s.index, y=y,
-                            mode="lines", name=names_map.get(bb, bb),
-                            line=dict(width=2)
-                        ))
-            fig_line.update_layout(
-                paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-                font_color="white", hovermode="x unified",
-                yaxis_title="Indexed (100 = start)" if normalize else "Price",
-                margin=dict(l=10, r=10, t=20, b=10), height=500,
-                legend=dict(bgcolor="#1a1a2e")
-            )
+                        fig_l.add_trace(go.Scatter(x=s.index, y=y, mode="lines",
+                                                   name=names_map.get(bb,bb),
+                                                   line=dict(width=1.5), opacity=0.75))
+
+            # Weighted portfolio composite
+            if show_port_line and normalize:
+                pm2 = PORTFOLIO_DF["region"].isin(sel_regions) & PORTFOLIO_DF["theme"].isin(sel_themes)
+                weighted_parts = []
+                for _, r in PORTFOLIO_DF[pm2].iterrows():
+                    if r["bb_ticker"] in price_data:
+                        s = price_data[r["bb_ticker"]].loc[entry_ts:today_ts].dropna()
+                        if len(s) > 1:
+                            weighted_parts.append((s / s.iloc[0]) * r["weight"])
+                if weighted_parts:
+                    combined = pd.concat(weighted_parts, axis=1).ffill().sum(axis=1)
+                    tot_w    = PORTFOLIO_DF[pm2]["weight"].sum()
+                    port_idx = combined / tot_w * 100
+                    fig_l.add_trace(go.Scatter(x=port_idx.index, y=port_idx,
+                                               mode="lines", name="📊 Portfolio (weighted)",
+                                               line=dict(width=3, color="#f39c12", dash="dash")))
+
             if normalize:
-                fig_line.add_hline(y=100, line_dash="dash", line_color="grey", line_width=1)
-            st.plotly_chart(fig_line, use_container_width=True)
+                fig_l.add_hline(y=100, line_dash="dash", line_color="grey", line_width=1)
+            fig_l.update_layout(
+                paper_bgcolor="#0e1117", plot_bgcolor="#0e1117", font_color="white",
+                hovermode="x unified",
+                yaxis_title="Indexed to 100 at entry" if normalize else "Price",
+                xaxis_title="Date",
+                height=520, margin=dict(l=10,r=10,t=20,b=10),
+                legend=dict(bgcolor="#1a1a2e", bordercolor="#444", borderwidth=1)
+            )
+            st.plotly_chart(fig_l, use_container_width=True)
         else:
             st.info("Select at least one ticker above.")
 

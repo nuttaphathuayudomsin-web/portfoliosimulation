@@ -18,6 +18,7 @@ st.set_page_config(page_title="Portfolio Dashboard", layout="wide", page_icon="�
 
 # ── Ticker mapping (Bloomberg → Yahoo Finance) ──────────────────────────────
 TICKER_MAP = {
+    # US — Developed Markets
     "LAM US Equity":    "LRCX",
     "SNDK US Equity":   "SNDK",
     "MU US Equity":     "MU",
@@ -49,25 +50,32 @@ TICKER_MAP = {
     "DG":               "DG",
     "PG":               "PG",
     "CL":               "CL",
+    # APAC — Japan (.T) & Korea (.KS)
     "6146 JP Equity":   "6146.T",
     "6857 JP Equity":   "6857.T",
     "4062 JP Equity":   "4062.T",
     "6383 JP Equity":   "6383.T",
+    "000660 KS":        "000660.KS",
+    "005930 KS":        "005930.KS",
     "9104 JP":          "9104.T",
     "7011 JP":          "7011.T",
     "7012 JP":          "7012.T",
+    # Emerging Markets — China & HK
+    "688041 CH Equity": "688041.SS",
+    "603986 CH Equity": "603986.SS",
+    "300476 CH Equity": "300476.SZ",
+    "1772 HK Equity":   "1772.HK",
+    "002353 CH":        "002353.SZ",
+    # Commodities & Inflation hedge (ETFs)
     "GOLD":             "GLD",
     "SILVER":           "SLV",
     "OIL":              "USO",
-    "688041 CH Equity": "688041.SS",
-    "603986 CH Equity": "603986.SS",
-    "1772 HK Equity":   "1772.HK",
-    "300476 CH Equity": "300476.SZ",
-    "002353 CH":        "002353.SZ",
 }
 
-# ── Portfolio structure ──────────────────────────────────────────────────────
+# ── Portfolio structure (synced from Portfolio_Simulation.xlsx) ──────────────
+# Format: (bb_ticker, display_name, weight, region, theme, sector)
 PORTFOLIO = [
+    # ── Developed Markets / US / Upstream AI ─────────────────────────────────
     ("LAM US Equity",   "Lam Research",             0.004615, "Developed Markets", "Upstream AI",      "Machine"),
     ("SNDK US Equity",  "Sandisk",                  0.004615, "Developed Markets", "Upstream AI",      "Memory"),
     ("MU US Equity",    "Micron Technology",        0.004615, "Developed Markets", "Upstream AI",      "Memory"),
@@ -80,6 +88,7 @@ PORTFOLIO = [
     ("CAT US Equity",   "Caterpillar Inc",          0.004615, "Developed Markets", "Upstream AI",      "Energy - AI"),
     ("ON US Equity",    "ON Semiconductor",         0.004615, "Developed Markets", "Upstream AI",      "Packaging"),
     ("ADI US Equity",   "Analog Devices",           0.004615, "Developed Markets", "Upstream AI",      "Packaging"),
+    # ── Developed Markets / US / Defense ─────────────────────────────────────
     ("MOG/A US Equity", "Moog Inc",                 0.003333, "Developed Markets", "Defense",          "Sensors"),
     ("VSEC US Equity",  "VSE Corp",                 0.003333, "Developed Markets", "Defense",          "Components"),
     ("HII US Equity",   "Huntington Ingalls",       0.003333, "Developed Markets", "Defense",          "Ship building"),
@@ -89,31 +98,43 @@ PORTFOLIO = [
     ("RTX US Equity",   "RTX Corporation",          0.003333, "Developed Markets", "Defense",          "Drone"),
     ("LMT US Equity",   "Lockheed Martin",          0.003333, "Developed Markets", "Defense",          "Aircraft"),
     ("NOC US Equity",   "Northrop Grumman",         0.003333, "Developed Markets", "Defense",          "Aircraft"),
+    # ── Developed Markets / US / Energy ──────────────────────────────────────
     ("OXY",             "Occidental Petroleum",     0.006,    "Developed Markets", "Energy",           "Oil field"),
     ("CVX",             "Chevron",                  0.006,    "Developed Markets", "Energy",           "Integrated"),
     ("XOM",             "Exxon Mobil",              0.006,    "Developed Markets", "Energy",           "Integrated"),
     ("SLB",             "Schlumberger",             0.006,    "Developed Markets", "Energy",           "Oil field"),
     ("BE US Equity",    "Bloom Energy",             0.006,    "Developed Markets", "Energy",           "Hydrogen"),
+    # ── Developed Markets / US / Inflation-linked ─────────────────────────────
     ("WMT",             "Walmart Inc",              0.003,    "Developed Markets", "Inflation-linked", "Discount store"),
     ("COST",            "Costco",                   0.003,    "Developed Markets", "Inflation-linked", "Big box"),
     ("DG",              "Dollar General",           0.003,    "Developed Markets", "Inflation-linked", "Discount store"),
     ("PG",              "P&G",                      0.003,    "Developed Markets", "Inflation-linked", "Household"),
     ("CL",              "Colgate",                  0.003,    "Developed Markets", "Inflation-linked", "Household"),
-    ("6146 JP Equity",  "Disco Corp",               0.025,    "APAC",              "Upstream AI",      "Semiconductor"),
-    ("6857 JP Equity",  "Advantest Corp",           0.025,    "APAC",              "Upstream AI",      "Semiconductor"),
-    ("4062 JP Equity",  "Ibiden Co Ltd",            0.025,    "APAC",              "Upstream AI",      "Semiconductor"),
-    ("6383 JP Equity",  "Daifuku Co Ltd",           0.025,    "APAC",              "Upstream AI",      "Semiconductor"),
-    ("9104 JP",         "Mitsui OSK Lines",         0.1,      "APAC",              "Energy",           "Shipping"),
-    ("7011 JP",         "Mitsubishi Heavy",         0.05,     "APAC",              "Defense",          "Heavy industry"),
-    ("7012 JP",         "Kawasaki Heavy",           0.05,     "APAC",              "Defense",          "Heavy industry"),
-    ("688041 CH Equity","Hygon Information Tech",   0.05,     "Emerging Markets",  "Upstream AI",      "Chips"),
-    ("603986 CH Equity","GigaDevice",               0.05,     "Emerging Markets",  "Upstream AI",      "Chips"),
-    ("1772 HK Equity",  "Ganfeng Lithium",          0.05,     "Emerging Markets",  "Upstream AI",      "Mining"),
-    ("300476 CH Equity","Victory Giant",            0.05,     "Emerging Markets",  "Upstream AI",      "PCB"),
-    ("002353 CH",       "Yangtai Jereh Oilfield",   0.1,      "Emerging Markets",  "Energy",           "Energy"),
-    ("GOLD",            "Gold (GLD ETF)",           0.05,     "Inflation-hedged",  "Precious Metal",   "Gold"),
-    ("SILVER",          "Silver (SLV ETF)",         0.05,     "Inflation-hedged",  "Precious Metal",   "Silver"),
-    ("OIL",             "Oil (USO ETF)",            0.1,      "Commodity",         "Commodity",        "Oil"),
+    # ── APAC / Upstream AI (JP + KR) ─────────────────────────────────────────
+    ("6146 JP Equity",  "Disco Corp",               0.000833, "APAC",             "Upstream AI",      "Machine"),
+    ("6857 JP Equity",  "Advantest Corp",           0.000833, "APAC",             "Upstream AI",      "Machine"),
+    ("4062 JP Equity",  "Ibiden Co Ltd",            0.000833, "APAC",             "Upstream AI",      "Machine"),
+    ("6383 JP Equity",  "Daifuku Co Ltd",           0.000833, "APAC",             "Upstream AI",      "Automation"),
+    ("000660 KS",       "SK Hynix",                 0.000833, "APAC",             "Upstream AI",      "Foundry"),
+    ("005930 KS",       "Samsung Electronics",      0.000833, "APAC",             "Upstream AI",      "Foundry"),
+    # ── APAC / Energy ────────────────────────────────────────────────────────
+    ("9104 JP",         "Mitsui OSK Lines",         0.005,    "APAC",             "Energy",           "Tanker"),
+    # ── APAC / Defense ───────────────────────────────────────────────────────
+    ("7011 JP",         "Mitsubishi Heavy",         0.0025,   "APAC",             "Defense",          "Aircraft, Turbine"),
+    ("7012 JP",         "Kawasaki Heavy",           0.0025,   "APAC",             "Defense",          "Aircraft, Turbine"),
+    # ── Emerging Markets / Upstream AI ───────────────────────────────────────
+    ("688041 CH Equity","Hygon Information Tech",   0.025,    "Emerging Markets", "Upstream AI",      "Chips"),
+    ("603986 CH Equity","GigaDevice",               0.025,    "Emerging Markets", "Upstream AI",      "Chips"),
+    ("300476 CH Equity","Victory Giant",            0.025,    "Emerging Markets", "Upstream AI",      "PCB"),
+    # ── Emerging Markets / Precious Metal ────────────────────────────────────
+    ("1772 HK Equity",  "Ganfeng Lithium",          0.0375,   "Emerging Markets", "Precious Metal",   "Mining"),
+    # ── Emerging Markets / Energy ─────────────────────────────────────────────
+    ("002353 CH",       "Yangtai Jereh Oilfield",   0.0375,   "Emerging Markets", "Energy",           "Energy"),
+    # ── Inflation-hedged ─────────────────────────────────────────────────────
+    ("GOLD",            "Gold (GLD ETF)",           0.025,    "Inflation-hedged", "Precious Metal",   "Gold"),
+    ("SILVER",          "Silver (SLV ETF)",         0.025,    "Inflation-hedged", "Precious Metal",   "Silver"),
+    # ── Commodity ────────────────────────────────────────────────────────────
+    ("OIL",             "Oil (USO ETF)",            0.05,     "Commodity",        "Commodity",        "Oil"),
 ]
 
 PORTFOLIO_DF = pd.DataFrame(PORTFOLIO, columns=["bb_ticker","name","weight","region","theme","sector"])
@@ -209,17 +230,33 @@ def main():
         st.header("⚙️ Settings")
 
         # Business-day date list from 2022 to today
-        bdays     = [d.date() for d in pd.date_range(date(2022, 1, 1), TODAY, freq="B")]
-        def_idx   = len(bdays) - 1  # default = TODAY (Mar 3 2026)
+        bdays   = [d.date() for d in pd.date_range(date(2022, 1, 1), TODAY, freq="B")]
+        def_idx = len(bdays) - 1  # default = TODAY (Mar 3 2026)
 
         st.markdown("**📅 Portfolio Entry Date**")
-        entry_idx  = st.select_slider(
-            "Slide to set entry point",
-            options=range(len(bdays)),
-            value=def_idx,
-            format_func=lambda i: bdays[i].strftime("%d %b %Y"),
-        )
-        entry_date = bdays[entry_idx]
+        picker_mode = st.radio("Input mode", ["📅 Calendar", "🎚️ Slider"], horizontal=True)
+
+        if picker_mode == "📅 Calendar":
+            entry_date = st.date_input(
+                "Pick entry date",
+                value=TODAY,
+                min_value=date(2022, 1, 1),
+                max_value=TODAY,
+                format="DD/MM/YYYY",
+            )
+            # Snap to nearest business day if weekend selected
+            ts = pd.Timestamp(entry_date)
+            if ts.weekday() >= 5:  # Saturday=5, Sunday=6
+                entry_date = (ts - pd.offsets.BDay(1)).date()
+                st.caption(f"⚠️ Weekend selected — snapped to {entry_date.strftime('%d %b %Y')}")
+        else:
+            entry_idx  = st.select_slider(
+                "Slide to set entry point",
+                options=range(len(bdays)),
+                value=def_idx,
+                format_func=lambda i: bdays[i].strftime("%d %b %Y"),
+            )
+            entry_date = bdays[entry_idx]
 
         days_held  = (TODAY - entry_date).days
         st.success(f"Entry: **{entry_date.strftime('%d %b %Y')}**  \nToday: **{TODAY.strftime('%d %b %Y')}**  \nHeld: **{days_held} days**")
@@ -234,6 +271,34 @@ def main():
             st.cache_data.clear()
             st.rerun()
         st.caption(f"Cached: {datetime.now().strftime('%d %b %Y %H:%M')}")
+
+        st.divider()
+        with st.expander("➕ How to add stocks"):
+            st.markdown("""
+**Step 1 — Add to `TICKER_MAP`** (top of the file)
+```python
+"NVDA US Equity": "NVDA",
+"7203 JP Equity": "7203.T",
+"005930 KS":      "005930.KS",
+```
+Yahoo Finance suffixes by market:
+- 🇺🇸 US → no suffix (`AAPL`, `LRCX`)
+- 🇯🇵 JP → `.T` (`6857.T`)
+- 🇰🇷 KR → `.KS` (`005930.KS`)
+- 🇭🇰 HK → `.HK` (`1772.HK`)
+- 🇨🇳 CN Shanghai → `.SS`
+- 🇨🇳 CN Shenzhen → `.SZ`
+
+**Step 2 — Add to `PORTFOLIO`** (below TICKER_MAP)
+```python
+("NVDA US Equity", "Nvidia",
+  0.01,                # weight (1%)
+  "Developed Markets", # region
+  "Upstream AI",       # theme
+  "Chips"),            # sector
+```
+⚠️ Keep total weights summed to **1.0** (100%)
+            """)
 
     # ── Load data ─────────────────────────────────────────────────────────────
     with st.spinner("Pulling prices from Yahoo Finance..."):
